@@ -34,7 +34,7 @@ namespace SuggestMiner
 
         public SuggestionsSet(string FileName, string SuggestionString)
         {
-            //ThreadPool.SetMaxThreads(100,1000);
+            ThreadPool.SetMaxThreads(100,1000);
             ServicePointManager.MaxServicePoints = 128;
             _keywordsFilename = FileName;
 			_workqueue.Enqueue(SuggestionString);
@@ -45,38 +45,57 @@ namespace SuggestMiner
         {
 			while (_workqueue.Count > 0 || _threadCount>0)
 			{
-				if (_workqueue.Count > 0)
+				//Console.Write("{0}:{1}  ", _threadCount, _workqueue.Count);
+				if (_workqueue.Count > 0 && _threadCount<25)
 				{
+					Interlocked.Increment(ref _threadCount);
 					ThreadPool.QueueUserWorkItem(new WaitCallback(GetSuggestions), _workqueue.Dequeue());
+				}
+				else
+				{
+					Thread.Sleep(100);
 				}
 			}
         }
 		private void GetSuggestions(Object SuggestionObject)
 		{
-			Interlocked.Increment(ref _threadCount);
-			string SuggestionString = (string)SuggestionObject;
-			SuggestToolResults SuggestToolAnswer = new SuggestToolResults(SuggestionString);
-			SuggestToolAnswer.Completed.WaitOne();
-			if (SuggestToolAnswer.Count == 10)
+			try
 			{
-				KeywordSet NextKeywords = new KeywordSet(SuggestionString);
-				foreach (string NextKeyword in NextKeywords)
+				string SuggestionString = (string)SuggestionObject;
+				SuggestToolResults SuggestToolAnswer = new SuggestToolResults(SuggestionString);
+				SuggestToolAnswer.Completed.WaitOne();
+				if (SuggestToolAnswer.Count == 10)
 				{
-					_workqueue.Enqueue(NextKeyword);
-				}
-			}
-			else
-			{
-				foreach (string Keyword in SuggestToolAnswer.Keys)
-				{
-					if (!_suggestions.ContainsKey(Keyword))
+					KeywordSet NextKeywords = new KeywordSet(SuggestionString);
+					foreach (string NextKeyword in NextKeywords)
 					{
-						_suggestions.Add(Keyword, SuggestToolAnswer[Keyword]);
-						Console.WriteLine(Keyword);
+						_workqueue.Enqueue(NextKeyword);
 					}
 				}
+				else if (SuggestToolAnswer.Success == true)
+				{
+					foreach (string Keyword in SuggestToolAnswer.Keys)
+					{
+						if (!_suggestions.ContainsKey(Keyword))
+						{
+							_suggestions.Add(Keyword, SuggestToolAnswer[Keyword]);
+							Console.WriteLine(Keyword);
+						}
+					}
+				}
+				else
+				{
+					_workqueue.Enqueue(SuggestionString);
+				}
 			}
-			Interlocked.Decrement(ref _threadCount);
+			catch (Exception error)
+			{
+				Console.WriteLine(error.Message);
+			}
+			finally
+			{
+				Interlocked.Decrement(ref _threadCount);
+			}
 		}
 		private void WriteToFile()
 		{

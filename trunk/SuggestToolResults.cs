@@ -19,6 +19,7 @@ namespace SuggestMiner
 	class SuggestToolResults:Dictionary<String,int>
 	{
 		public AutoResetEvent Completed = new AutoResetEvent(false);
+		public bool Success = false;
 		public SuggestToolResults(string StarterString):base()
 		{
 			HttpWebRequest SuggestionResultsRequest = (HttpWebRequest)WebRequest.Create("http://www.google.com/complete/search?output=toolbar&q=" + StarterString);
@@ -34,22 +35,34 @@ namespace SuggestMiner
 			SuggestToolResultsState State = (SuggestToolResultsState)asynchronousResult.AsyncState;
 			HttpWebRequest Request = State.Request;
 			string SuggestionString = State.Keyword;
-			HttpWebResponse SuggestionResultsResponse = (HttpWebResponse)Request.EndGetResponse(asynchronousResult);
-			StreamReader SuggestionResultsStream = new StreamReader(SuggestionResultsResponse.GetResponseStream());
-			XPathDocument SuggestionResultsXPathDoc = new XPathDocument(SuggestionResultsStream);
-			XPathNavigator SuggestionsNav = SuggestionResultsXPathDoc.CreateNavigator();
-			XPathNodeIterator SuggestionsIterator = SuggestionsNav.Select("//CompleteSuggestion");
-			while (SuggestionsIterator.MoveNext())
+			try
 			{
-				string Keyword = SuggestionsIterator.Current.SelectSingleNode("suggestion").GetAttribute("data", "");
-				int NumberOfQueries = Convert.ToInt32(SuggestionsIterator.Current.SelectSingleNode("num_queries ").GetAttribute("int", ""));
-				if (!this.ContainsKey(Keyword))
+				HttpWebResponse SuggestionResultsResponse = (HttpWebResponse)Request.EndGetResponse(asynchronousResult);
+				StreamReader SuggestionResultsStream = new StreamReader(SuggestionResultsResponse.GetResponseStream());
+				XPathDocument SuggestionResultsXPathDoc = new XPathDocument(SuggestionResultsStream);
+				XPathNavigator SuggestionsNav = SuggestionResultsXPathDoc.CreateNavigator();
+				XPathNodeIterator SuggestionsIterator = SuggestionsNav.Select("//CompleteSuggestion");
+				while (SuggestionsIterator.MoveNext())
 				{
-					this.Add(Keyword, NumberOfQueries);
+					string Keyword = SuggestionsIterator.Current.SelectSingleNode("suggestion").GetAttribute("data", "");
+					int NumberOfQueries = Convert.ToInt32(SuggestionsIterator.Current.SelectSingleNode("num_queries ").GetAttribute("int", ""));
+					if (!this.ContainsKey(Keyword))
+					{
+						this.Add(Keyword, NumberOfQueries);
+					}
 				}
+				SuggestionResultsResponse.Close();
+				Success = true;
 			}
-			SuggestionResultsResponse.Close();
-			Completed.Set();
+			catch (WebException error)
+			{
+				Console.WriteLine(error.Message);
+
+			}
+			finally
+			{
+				Completed.Set();
+			}
 		}
 	}
 
