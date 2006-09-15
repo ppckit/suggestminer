@@ -15,16 +15,8 @@ namespace SuggestMiner
     {
         static void Main(string[] args)
         {
-            Suggestions BunchOfSuggestions = new Suggestions(args[0], args[1]);
+            SuggestionsSet BunchOfSuggestions = new SuggestionsSet(args[0], args[1]);
         }
-    }
-    public class Suggestions
-    {
-        public Suggestions(string FileName,string Prefix)
-        {
-            SuggestionsSet Suggestions = new SuggestionsSet(FileName, Prefix);
-            Suggestions.Execute();
-        }       
     }
 
     public class SuggestionState
@@ -35,82 +27,77 @@ namespace SuggestMiner
 
     public class SuggestionsSet
     {
+		private int _threadCount = 0;
         private string _keywordsFilename;
         private Dictionary<string, int> _suggestions = new Dictionary<string, int>();
-        private string _initialSuggestion;
-        private int ThreadCount = 0;
+		private Queue<string> _workqueue = new Queue<string>();
 
         public SuggestionsSet(string FileName, string SuggestionString)
         {
-            ThreadPool.SetMaxThreads(100,1000);
+            //ThreadPool.SetMaxThreads(100,1000);
             ServicePointManager.MaxServicePoints = 128;
             _keywordsFilename = FileName;
-            _initialSuggestion = SuggestionString;
+			_workqueue.Enqueue(SuggestionString);
+			ProcessQueue();
+			WriteToFile();
         }
-        public void Execute()
+        public void ProcessQueue()
         {
-            this.GetSuggestions(_initialSuggestion);
-            while (ThreadCount != 0)
-            {
-                Thread.Sleep(TimeSpan.FromSeconds(10));
-            }
-            StreamWriter KeywordsFileWriter = new StreamWriter(_keywordsFilename);
-            foreach (string Keyword in _suggestions.Keys)
-            {
-                KeywordsFileWriter.WriteLine(Keyword + "," + _suggestions[Keyword]);
-            }
-            KeywordsFileWriter.Close();
+			while (_workqueue.Count > 0 || _threadCount>0)
+			{
+				if (_workqueue.Count > 0)
+				{
+					ThreadPool.QueueUserWorkItem(new WaitCallback(GetSuggestions), _workqueue.Dequeue());
+				}
+			}
         }
-
-        public void GetSuggestions(String SuggestionString)
-        {
-            HttpWebRequest SuggestionResultsRequest = (HttpWebRequest)WebRequest.Create("http://www.google.com/complete/search?output=toolbar&q=" + SuggestionString);
-            SuggestionResultsRequest.KeepAlive = false;
-            SuggestionState State = new SuggestionState();
-            State.Keyword = SuggestionString;
-            State.Request = SuggestionResultsRequest;
-            Interlocked.Increment(ref ThreadCount);
-            IAsyncResult result = SuggestionResultsRequest.BeginGetResponse(GotSuggestions,State);
-        }
-        public void GotSuggestions(IAsyncResult asynchronousResult)
-        {
-            try
-            {
-                SuggestionState State = (SuggestionState)asynchronousResult.AsyncState;
-                HttpWebRequest Request = State.Request;
-                string SuggestionString = State.Keyword;
-                HttpWebResponse SuggestionResultsResponse = (HttpWebResponse)Request.EndGetResponse(asynchronousResult);
-                StreamReader SuggestionResultsStream = new StreamReader(SuggestionResultsResponse.GetResponseStream());
-                XPathDocument SuggestionResultsXPathDoc = new XPathDocument(SuggestionResultsStream);
-                XPathNavigator SuggestionsNav = SuggestionResultsXPathDoc.CreateNavigator();
-                XPathNodeIterator SuggestionsIterator = SuggestionsNav.Select("//CompleteSuggestion");
-                Console.WriteLine("{0}: {1} results", SuggestionString, SuggestionsIterator.Count);
-                if (SuggestionsIterator.Count == 10)
-                {
-                    foreach (string NextKeyword in new KeywordSet(SuggestionString))
-                    {
-                        GetSuggestions(NextKeyword);
-                    }
-                }
-                while (SuggestionsIterator.MoveNext())
-                {
-                    string Keyword = SuggestionsIterator.Current.SelectSingleNode("suggestion").GetAttribute("data", "");
-                    int NumberOfQueries = Convert.ToInt32(SuggestionsIterator.Current.SelectSingleNode("num_queries ").GetAttribute("int", ""));
-                    if (!_suggestions.ContainsKey(Keyword))
-                    {
-                        _suggestions.Add(Keyword, NumberOfQueries);
-                    }
-                }
-                SuggestionResultsResponse.Close();
-            }
-            catch (Exception error)
-            {
-                Console.WriteLine(error.Message);
-            }
-            finally
-            {
-                Interlocked.Decrement(ref ThreadCount);
-            }
-        }
-    }
+		private void GetSuggestions(Object SuggestionObject)
+		{
+			Interlocked.Increment(ref _threadCount);
+			string SuggestionString = (string)SuggestionObject;
+			SuggestToolResults SuggestToolAnswer = new SuggestToolResults(SuggestionString);
+			SuggestToolAnswer.Completed.WaitOne();
+			if (SuggestToolAnswer.Count == 10)
+			{
+				KeywordSet NextKeywords = new KeywordSet(SuggestionString);
+				foreach (string NextKeyword in NextKeywords)
+				{
+					_workqueue.Enqueue(NextKeyword);
+				}
+			}
+			else
+			{
+				foreach (string Keyword in SuggestToolAnswer.Keys)
+				{
+					if (!_suggestions.ContainsKey(Keyword))
+					{
+						_suggestions.Add(Keyword, SuggestToolAnswer[Keyword]);
+						Console.WriteLine(Keyword);
+					}
+				}
+			}
+			Interlocked.Decrement(ref _threadCount);
+		}
+		private void WriteToFile()
+		{
+			StreamWriter KeywordsFileWriter = new StreamWriter(_keywordsFilename);
+			foreach (string Keyword in _suggestions.Keys)
+			{
+				KeywordsFileWriter.WriteLine(Keyword + "," + _suggestions[Keyword]);
+			}
+			KeywordsFileWriter.Close();
+		}
+   }
+	[TestFixture]
+	public class SuggestionsSetTests
+	{
+		[Test]
+		public void TimeTakenTest()
+		{
+			DateTime StartTime = DateTime.Now;
+			SuggestionsSet BunchOfSuggestions = new SuggestionsSet("Expedia.csv","Expedia+");
+			TimeSpan TimeTaken = DateTime.Now.Subtract(StartTime);
+			Console.WriteLine(TimeTaken.TotalSeconds);
+		}
+	}
 }
