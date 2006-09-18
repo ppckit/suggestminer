@@ -57,7 +57,6 @@ namespace SuggestMiner
 			catch (WebException error)
 			{
 				Console.WriteLine(error.Message);
-
 			}
 			finally
 			{
