@@ -1,0 +1,1 @@
+Search Marketers are always looking for new keywords to help with their PPC advertising campaigns. This tool along with a suitable prefix will provide very clean lists of keywords for free. Better than subscribing to Hitwise or KeywordDiscovery!
